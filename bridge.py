@@ -184,7 +184,7 @@ class BridgeCase:
         self.run_ifem(self.directory('raw', index), context)
 
     def run(self, nsols: int, **kwargs):
-        quadrule = quadpy.line_segment.gauss_legendre(nsols)
+        quadrule = quadpy.c1.gauss_legendre(nsols)
         params = {
             'load_left': affine(quadrule.points, 0.0, self.span - self.load_width),
             'load_right': affine(quadrule.points, self.load_width, self.span),
