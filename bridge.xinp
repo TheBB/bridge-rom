@@ -1,0 +1,43 @@
+<?xml version='1.0' encoding='utf-8' standalone='no'?>
+
+<simulation>
+
+  <geometry>
+    <patchfile>{{geometry}}</patchfile>
+    <include>topology.xinp</include>
+    <include>topologysets.xinp</include>
+  </geometry>
+
+  <boundaryconditions>
+    {% if with_dirichlet %}
+      <dirichlet set="support" comp="12" />
+    {% endif %}
+    {% if with_neumann %}
+      <neumann set="surface" direction="0" type="expression">
+        {{load}} * if(and(above(x,{{load_left}}),below(x,{{load_right}})),-1.0,0.0)
+      </neumann>
+    {% endif %}
+  </boundaryconditions>
+
+  <elasticity>
+    <gravity y="-9.81" />
+    <isotropic E="3.0e10" nu="0.2" rho="2500.0" />
+  </elasticity>
+
+  <postprocessing>
+    <projection type="cgl2" />
+    <dump_sol_vector>sol.out</dump_sol_vector>
+    <dump_lhs_matrix>lhs.out</dump_lhs_matrix>
+    <dump_rhs_vector>rhs.out</dump_rhs_vector>
+  </postprocessing>
+
+  <adaptive>
+    <scheme>isotropic_function</scheme>
+    <beta>{{beta}}</beta>
+    <errtol>0.01</errtol>
+    <maxstep>{{maxstep}}</maxstep>
+    <use_norm>1</use_norm>
+    <use_sub_norm>2</use_sub_norm>
+  </adaptive>
+
+</simulation>
