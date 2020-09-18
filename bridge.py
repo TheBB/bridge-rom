@@ -182,11 +182,11 @@ class BridgeCase:
             print(result.stderr.decode())
             raise
 
-    def run_single(self, path: Path, **kwargs):
+    def run_single(self, path: Path, geometry: Optional[Union[str, Path]] = None, **kwargs):
         context = self.__class__.__dict__.copy()
         context.update(self.__dict__)
         context.update(kwargs)
-        self.run_ifem(path, context)
+        self.run_ifem(path, context, geometry)
 
     def run(self, nsols: int, **kwargs):
         quadrule = quadpy.c1.gauss_legendre(nsols)
@@ -316,8 +316,9 @@ class BridgeCase:
             'load_right': affine(quadrule.points, self.load_width, self.span),
         }
 
+        geometry = self.directory('merged') / 'geometry.lr'
         for i, params in tqdm(enumerate(dictzip(**params)), 'Integrating', total=nsols):
-            self.run_single(self.directory('merged', i), with_dirichlet=False, **kwargs, **params)
+            self.run_single(self.directory('merged', i), geometry, **kwargs, **params, with_dirichlet=False)
 
     def compare(self, nsols: int, nred: int):
         hi_lhs = self.load_fullscale_superlu()
