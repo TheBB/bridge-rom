@@ -10,8 +10,10 @@ import h5py
 from jinja2 import Template
 import lrspline as lr
 import numpy as np
+from numpy.linalg import norm, solve
 import quadpy
-from scipy.sparse import csc_matrix
+from scipy.linalg import eigh
+from scipy.sparse import csc_matrix, eye
 import splipy.surface_factory as sf
 from splipy.io import G2
 from tqdm import tqdm
@@ -90,10 +92,13 @@ class BridgeCase:
     def __init__(self, **kwargs):
         self.__dict__.update(**kwargs)
 
-    def directory(self, name: str, index: Union[int, str]) -> Path:
-        if isinstance(index, int):
-            index = f'{index:03}'
-        path = Path('data') / name / index
+    def directory(self, name: str, index: Optional[Union[int, str]] = None) -> Path:
+        if index is None:
+            path = Path('data') / name
+        else:
+            if isinstance(index, int):
+                index = f'{index:03}'
+            path = Path('data') / name / index
         path.mkdir(mode=0o775, exist_ok=True, parents=True)
         return path
 
@@ -177,11 +182,11 @@ class BridgeCase:
             print(result.stderr.decode())
             raise
 
-    def run_single(self, index: int, **kwargs):
+    def run_single(self, path: Path, **kwargs):
         context = self.__class__.__dict__.copy()
         context.update(self.__dict__)
         context.update(kwargs)
-        self.run_ifem(self.directory('raw', index), context)
+        self.run_ifem(path, context)
 
     def run(self, nsols: int, **kwargs):
         quadrule = quadpy.c1.gauss_legendre(nsols)
@@ -191,7 +196,7 @@ class BridgeCase:
         }
 
         for i, params in tqdm(enumerate(dictzip(**params)), 'Solving', total=nsols):
-            self.run_single(i, **kwargs, **params)
+            self.run_single(self.directory('raw', i), **kwargs, **params)
 
     def merge(self, nsols: int):
         solutions = [self.load_solution(i) for i in range(nsols)]
@@ -210,7 +215,7 @@ class BridgeCase:
             for root, (g, _) in zip(rootpatches, sol):
                 np.testing.assert_allclose(root.controlpoints, g.controlpoints)
 
-        path = self.directory('merged', 'geometry')
+        path = self.directory('merged')
         with open(path / 'geometry.lr', 'wb') as f:
             for root in rootpatches:
                 root.write(f)
@@ -219,14 +224,14 @@ class BridgeCase:
         self.fullscale()
 
         numbering, ndofs = self.load_numbering()
-        data = np.zeros((ndofs, self.ndim))
+        data = np.zeros((nsols, ndofs, self.ndim))
         for i, sol in enumerate(solutions):
             for n, (_, s) in zip(numbering, sol):
-                data[n,:] = s.controlpoints
-            np.save(self.directory('merged', i) / 'sol.npy', data.flatten())
+                data[i,n,:] = s.controlpoints
+        np.save(self.directory('merged') / 'snapshots.npy', data.reshape(nsols, -1))
 
     def fullscale(self):
-        geometry = self.directory('merged', 'geometry') / 'geometry.lr'
+        geometry = self.directory('merged') / 'geometry.lr'
         target = self.directory('merged', 'fullscale')
         context = {
             'with_dirichlet': False,
@@ -263,12 +268,12 @@ class BridgeCase:
     def load_numbering(self):
         with h5py.File(self.directory('merged', 'fullscale') / 'bridge.hdf5', 'r') as f:
             group = f['0/Elasticity-1/l2g-node']
-            numbering = [group[f'{i+1}'][:] for i in range(len(group))]
+            numbering = [group[f'{i+1}'][:] - 1 for i in range(len(group))]
         ndofs = max(map(np.max, numbering)) + 1
         return numbering, ndofs
 
     def load_fullscale_geometry(self):
-        with open(self.directory('merged', 'geometry') / 'geometry.lr') as f:
+        with open(self.directory('merged') / 'geometry.lr') as f:
             return lr.LRSplineObject.read_many(f)
 
     def verify_numbering(self):
@@ -283,6 +288,56 @@ class BridgeCase:
             for node, number in zip(controlpoints, numbers):
                 assert np.linalg.norm(nodes.setdefault(number, node) - node) < 1e-10
 
+    def load_snapshots(self):
+        return np.load(self.directory('merged') / 'snapshots.npy')
+
+    def load_fullscale_superlu(self):
+        return self.load_superlu(self.directory('merged', 'fullscale'))
+
+    def project(self, nred: int):
+        data = self.load_snapshots()
+        hi_mass = eye(data.shape[1])
+
+        corr = data @ hi_mass @ data.T
+        eigvals, eigvecs = eigh(corr, turbo=False)
+        eigvals, eigvecs = eigvals[..., ::-1], eigvecs[..., ::-1]
+        np.savetxt(self.directory('reduced') / 'spectrum.csv', eigvals / eigvals[0])
+
+        proj = data.T @ eigvecs[:, :nred] / np.sqrt(eigvals[:nred])
+        np.save(self.directory('reduced', nred) / 'proj.npy', proj.T)
+
+    def load_project(self, nred: int):
+        return np.load(self.directory('reduced', nred) / 'proj.npy')
+
+    def run_rhs(self, nsols: int, **kwargs):
+        quadrule = quadpy.c1.gauss_legendre(nsols)
+        params = {
+            'load_left': affine(quadrule.points, 0.0, self.span - self.load_width),
+            'load_right': affine(quadrule.points, self.load_width, self.span),
+        }
+
+        for i, params in tqdm(enumerate(dictzip(**params)), 'Integrating', total=nsols):
+            self.run_single(self.directory('merged', i), with_dirichlet=False, **kwargs, **params)
+
+    def compare(self, nsols: int, nred: int):
+        hi_lhs = self.load_fullscale_superlu()
+        proj = self.load_project(nred)
+        lo_lhs = proj @ hi_lhs @ proj.T
+        data = self.load_snapshots()
+        hi_mass = eye(data.shape[1])
+
+        errors = []
+        for i in tqdm(range(nsols), 'Comparing'):
+            hi_sol = data[i]
+            hi_rhs = self.load_rhs(self.directory('merged', i))
+            rc_sol = solve(lo_lhs, proj @ hi_rhs) @ proj
+            diff = hi_sol - rc_sol
+            error = np.sqrt(diff.T @ hi_mass @ diff) / np.sqrt(hi_sol.T @ hi_mass @ hi_sol)
+            errors.append(error)
+
+        print(f'Average error: {np.mean(errors):.2e}')
+        print(f'Maximal error: {np.max(errors):.2e}')
+
 
 @click.command()
 @click.option('--order', '-o', default=2)
@@ -294,27 +349,17 @@ class BridgeCase:
 @click.option('--load', '-l', default=1e6)
 @click.option('--maxstep', default=10)
 @click.option('--beta', default=5)
-def main(**kwargs):
+@click.option('--nsols', default=10)
+@click.option('--nred', default=5)
+def main(nsols: int, nred: int, **kwargs):
     case = BridgeCase(**kwargs)
     case.setup()
-
-    # case.run(1, with_neumann=False, maxstep=0)
-    # case.merge(1)
-
-    case.run(10)
-    case.merge(10)
+    case.run(nsols)
+    case.merge(nsols)
     case.verify_numbering()
-
-    # case.fullscale()
-    # case.verify_numbering()
-    # numbering = case.load_numbering()
-
-    # for i in range(1):
-    #     path = case.directory('raw', i)
-    #     mx = case.load_superlu(path)
-    #     sol = case.load_sol(path)
-    #     rhs = case.load_rhs(path)
-    #     print(np.mean(np.abs(mx * sol - rhs)))
+    case.project(nred)
+    case.run_rhs(nsols)
+    case.compare(nsols, nred)
 
 
 if __name__ == '__main__':
