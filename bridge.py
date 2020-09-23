@@ -65,6 +65,17 @@ def dictzip(**kwargs):
     for values in zip(*kwargs.values()):
         yield dict(zip(kwargs.keys(), values))
 
+def permute_rows(test, control):
+    mismatches = [
+        i for i, (testrow, controlrow) in enumerate(zip(test, control))
+        if not np.allclose(testrow, controlrow)
+    ]
+    permutation = np.arange(len(test), dtype=np.int32)
+    for i in mismatches:
+        permutation[i] = next(j for j in mismatches if np.allclose(test[j], control[i]))
+    assert len(set(permutation)) == len(test) == len(control)
+    return permutation
+
 
 class BridgeCase:
 
@@ -103,9 +114,8 @@ class BridgeCase:
         path.mkdir(mode=0o775, exist_ok=True, parents=True)
         return path
 
-    def load_solution(self, index: int, step: Optional[int] = None) -> Solution:
+    def load_solution(self, path: int, step: Optional[int] = None) -> Solution:
         retval = []
-        path = self.directory('raw', index)
         with h5py.File(path / 'bridge.hdf5', 'r') as f:
             step = len(f) - 1 if step is None else step
             group = f[f'{step}/Elasticity-1']
@@ -213,7 +223,7 @@ class BridgeCase:
             self.run_single(self.directory('raw', i), **kwargs, **params)
 
     def merge(self, nsols: int):
-        solutions = [self.load_solution(i) for i in range(nsols)]
+        solutions = [self.load_solution(self.directory('raw', i)) for i in range(nsols)]
         rootpatches = [g.clone() for g, _ in solutions[0]]
 
         for sol in tqdm(solutions, 'Merging'):
@@ -225,9 +235,13 @@ class BridgeCase:
                 move_meshlines(src, tgt1)
                 move_meshlines(src, tgt2)
 
-        for sol in solutions:
-            for root, (g, _) in zip(rootpatches, sol):
-                np.testing.assert_allclose(root.controlpoints, g.controlpoints)
+        permutations = [
+            permute_rows(g.controlpoints, root.controlpoints)
+            for i, (root, (g, _)) in tqdm(enumerate(zip(rootpatches, solutions[0])), 'Permuting', total=self.npatches)
+        ]
+
+        for (root, (g, _), perm) in zip(rootpatches, sol, permutations):
+            np.testing.assert_allclose(root.controlpoints, g.controlpoints[perm,:])
 
         path = self.directory('merged')
         with open(path / 'geometry.lr', 'wb') as f:
@@ -237,11 +251,16 @@ class BridgeCase:
         # Generate numbering as side effect
         self.fullscale()
 
+        # Check that no renumbering has taken place within IFEM
+        fullpatches = self.load_solution(self.directory('merged', 'fullscale'))
+        for root, (full, _) in zip(rootpatches, fullpatches):
+            np.testing.assert_allclose(root.controlpoints, full.controlpoints)
+
         numbering, ndofs = self.load_numbering()
         data = np.zeros((nsols, ndofs, self.ndim))
         for i, sol in enumerate(solutions):
-            for n, (_, s) in zip(numbering, sol):
-                data[i,n,:] = s.controlpoints
+            for n, (_, s), perm in zip(numbering, sol, permutations):
+                data[i,n,:] = s.controlpoints[perm,:]
         np.save(self.directory('merged') / 'snapshots.npy', data.reshape(nsols, -1))
 
     def fullscale(self):
