@@ -153,7 +153,7 @@ class BridgeCase:
             f.write('  </set>\n')
             f.write('</topologysets>\n')
 
-    def run_ifem(self, target: Path, context: dict, geometry: Optional[Union[str, Path]] = None, allow_fail: bool = False):
+    def run_ifem(self, target: Path, context: dict, geometry: Optional[Union[str, Path]] = None, ignore: bool = False):
         if geometry is None:
             geometry = 'geometry.g2'
 
@@ -169,24 +169,29 @@ class BridgeCase:
             for fn in INPUT + [geometry]:
                 shutil.copy(fn, root)
 
-            result = run([IFEM, 'bridge.xinp', '-2D', '-hdf5', '-adap', '-cgl2'], cwd=root, stdout=PIPE, stderr=PIPE)
+            dim = '-2D' if self.ndim == 2 else '-3D'
+            args = [IFEM, 'bridge.xinp', dim, '-hdf5', '-adap', '-cgl2']
+            if ignore:
+                args.append('-ignoresol')
+            result = run(args, cwd=root, stdout=PIPE, stderr=PIPE)
             for fn in OUTPUT + [context['geometry']]:
                 if (root / fn).exists():
                     shutil.copy(root / fn, target)
 
-        if allow_fail:
-            return
         try:
             result.check_returncode()
         except:
+            print('Error from IFEM:')
+            print('------------------------------------------------')
             print(result.stderr.decode())
+            print('------------------------------------------------')
             raise
 
-    def run_single(self, path: Path, geometry: Optional[Union[str, Path]] = None, **kwargs):
+    def run_single(self, path: Path, geometry: Optional[Union[str, Path]] = None, ignore: bool = False, **kwargs):
         context = self.__class__.__dict__.copy()
         context.update(self.__dict__)
         context.update(kwargs)
-        self.run_ifem(path, context, geometry)
+        self.run_ifem(path, context, geometry, ignore=ignore)
 
     def run(self, nsols: int, **kwargs):
         quadrule = quadpy.c1.gauss_legendre(nsols)
@@ -238,7 +243,7 @@ class BridgeCase:
             'with_neumann': False,
             'maxstep': 0,
         }
-        self.run_ifem(target, context, geometry, allow_fail=True)
+        self.run_ifem(target, context, geometry, ignore=True)
 
     def load_superlu(self, directory: Path):
         with open(directory / 'lhs.out') as f:
@@ -318,7 +323,7 @@ class BridgeCase:
 
         geometry = self.directory('merged') / 'geometry.lr'
         for i, params in tqdm(enumerate(dictzip(**params)), 'Integrating', total=nsols):
-            self.run_single(self.directory('merged', i), geometry, **kwargs, **params, with_dirichlet=False)
+            self.run_single(self.directory('merged', i), geometry, **kwargs, **params, with_dirichlet=False, ignore=True)
 
     def compare(self, nsols: int, nred: int):
         hi_lhs = self.load_fullscale_superlu()
