@@ -10,7 +10,7 @@
 
   <boundaryconditions>
     {% if with_dirichlet %}
-      <dirichlet set="support" comp="12" />
+      <dirichlet set="support" comp="12{% if ndim==3 %}3{% endif %}" />
     {% endif %}
     {% if with_neumann %}
       <neumann set="surface" direction="0" type="expression">
@@ -20,7 +20,7 @@
   </boundaryconditions>
 
   <elasticity>
-    <gravity y="-9.81" />
+    <gravity {% if ndim==2 %}y{% else %}z{% endif %}="-9.81" />
     <isotropic E="3.0e10" nu="0.2" rho="2500.0" />
   </elasticity>
 
