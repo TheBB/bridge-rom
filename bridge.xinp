@@ -19,6 +19,10 @@
     {% endif %}
   </boundaryconditions>
 
+  <discretization>
+    <nGauss>{{ngauss}} 3</nGauss>
+  </discretization>
+
   <elasticity>
     <gravity {% if ndim==2 %}y{% else %}z{% endif %}="-9.81" />
     <isotropic E="3.0e10" nu="0.2" rho="2500.0" />
@@ -26,9 +30,11 @@
 
   <postprocessing>
     <projection type="cgl2" />
-    <dump_sol_vector>sol.out</dump_sol_vector>
-    <dump_lhs_matrix>lhs.out</dump_lhs_matrix>
-    <dump_rhs_vector>rhs.out</dump_rhs_vector>
+    {% if dump %}
+      <dump_sol_vector>sol.out</dump_sol_vector>
+      <dump_lhs_matrix>lhs.out</dump_lhs_matrix>
+      <dump_rhs_vector>rhs.out</dump_rhs_vector>
+    {% endif %}
   </postprocessing>
 
   <adaptive>

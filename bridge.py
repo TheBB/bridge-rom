@@ -82,12 +82,14 @@ class BridgeCase:
     # Operation
     nprocs: int
     nice: int
+    dump: bool = False
 
     # Discretization
     order: int
     ndim: int
     meshwidth: float
     npatches: int
+    ngauss: int
 
     # Geometry
     span: float
@@ -177,9 +179,11 @@ class BridgeCase:
             f.write('</topologysets>\n')
 
     def run_ifem(self, target: Path, context: dict, geometry: Optional[Union[str, Path]] = None,
-                 ignore: bool = False, rhs_only: bool = False):
+                 ignore: bool = False, rhs_only: bool = False, nprocs: int = None):
         if geometry is None:
             geometry = 'geometry.g2'
+        if nprocs is None:
+            nprocs = self.nprocs
 
         context = context.copy()
         context['geometry'] = Path(geometry).name
@@ -282,8 +286,11 @@ class BridgeCase:
             'with_dirichlet': False,
             'with_neumann': False,
             'maxstep': 0,
+            'dump': True,
         }
-        self.run_ifem(target, context, geometry, ignore=True)
+
+        # Must run with one process to get dump
+        self.run_ifem(target, context, geometry, nprocs=1, ignore=True)
 
     def load_superlu(self, directory: Path):
         with open(directory / 'lhs.out') as f:
@@ -364,7 +371,7 @@ class BridgeCase:
         geometry = self.directory('merged') / 'geometry.lr'
         for i, params in tqdm(enumerate(dictzip(**params)), 'Integrating', total=nsols):
             self.run_single(self.directory('merged', i), geometry, **kwargs, **params,
-                            with_dirichlet=False, ignoresol=True, rhs_only=True)
+                            with_dirichlet=False, ignoresol=True, rhs_only=True, dump=True, nprocs=1)
 
     def compare(self, nsols: int, nred: int):
         hi_lhs = self.load_fullscale_superlu()
@@ -400,6 +407,7 @@ class BridgeCase:
 @click.option('--nred', default=5)
 @click.option('--nprocs', default=1)
 @click.option('--nice', default=0)
+@click.option('--ngauss', default=3)
 def main(nsols: int, nred: int, **kwargs):
     case = BridgeCase(**kwargs)
     case.setup()
