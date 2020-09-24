@@ -74,6 +74,7 @@ def permute_rows(test, control):
     for i in mismatches:
         permutation[i] = next(j for j in mismatches if np.allclose(test[j], control[i]))
     assert len(set(permutation)) == len(test) == len(control)
+    np.testing.assert_allclose(test[permutation,:], control)
     return permutation
 
 
@@ -199,14 +200,15 @@ class BridgeCase:
 
             dim = '-2D' if self.ndim == 2 else '-3D'
             args = [IFEM, 'bridge.xinp', dim, '-hdf5', '-adap', '-cgl2']
-            if self.nprocs > 1:
-                args = ['mpirun', '-np', str(self.nprocs)] + args
+            if nprocs > 1:
+                args = ['mpirun', '-np', str(nprocs)] + args
             if self.nice != 0:
                 args = ['nice', f'-n{self.nice}'] + args
             if ignore:
                 args.append('-ignoresol')
             if rhs_only:
                 args.append('-rhsonly')
+            print(args)
             result = run(args, cwd=root, stdout=PIPE, stderr=PIPE)
             for fn in OUTPUT + [context['geometry']]:
                 if (root / fn).exists():
@@ -222,11 +224,11 @@ class BridgeCase:
             raise
 
     def run_single(self, path: Path, geometry: Optional[Union[str, Path]] = None,
-                   ignore: bool = False, rhs_only: bool = False, **kwargs):
+                   ignore: bool = False, rhs_only: bool = False, nprocs: int = None, **kwargs):
         context = self.__class__.__dict__.copy()
         context.update(self.__dict__)
         context.update(kwargs)
-        self.run_ifem(path, context, geometry, ignore=ignore, rhs_only=rhs_only)
+        self.run_ifem(path, context, geometry, ignore=ignore, rhs_only=rhs_only, nprocs=nprocs)
 
     def run(self, nsols: int, **kwargs):
         quadrule = quadpy.c1.gauss_legendre(nsols)
@@ -252,12 +254,16 @@ class BridgeCase:
                 move_meshlines(src, tgt2)
 
         permutations = [
-            permute_rows(g.controlpoints, root.controlpoints)
-            for i, (root, (g, _)) in tqdm(enumerate(zip(rootpatches, solutions[0])), 'Permuting', total=self.npatches)
+            [
+                permute_rows(g.controlpoints, root.controlpoints)
+                for i, (root, (g, _)) in enumerate(zip(rootpatches, sol))
+            ]
+            for sol in tqdm(solutions, 'Permuting')
         ]
 
-        for (root, (g, _), perm) in zip(rootpatches, sol, permutations):
-            np.testing.assert_allclose(root.controlpoints, g.controlpoints[perm,:])
+        for i, (sol, perms) in enumerate(zip(solutions, permutations)):
+            for (root, (g, _), perm) in zip(rootpatches, sol, perms):
+                np.testing.assert_allclose(root.controlpoints, g.controlpoints[perm,:])
 
         path = self.directory('merged')
         with open(path / 'geometry.lr', 'wb') as f:
@@ -274,8 +280,8 @@ class BridgeCase:
 
         numbering, ndofs = self.load_numbering()
         data = np.zeros((nsols, ndofs, self.ndim))
-        for i, sol in enumerate(solutions):
-            for n, (_, s), perm in zip(numbering, sol, permutations):
+        for i, (sol, perms) in enumerate(zip(solutions, permutations)):
+            for n, (_, s), perm in zip(numbering, sol, perms):
                 data[i,n,:] = s.controlpoints[perm,:]
         np.save(self.directory('merged') / 'snapshots.npy', data.reshape(nsols, -1))
 
@@ -375,7 +381,9 @@ class BridgeCase:
 
     def compare(self, nsols: int, nred: int):
         hi_lhs = self.load_fullscale_superlu()
+        print(hi_lhs.shape)
         proj = self.load_project(nred)
+        print(proj.shape)
         lo_lhs = proj @ hi_lhs @ proj.T
         data = self.load_snapshots()
         hi_mass = eye(data.shape[1])
