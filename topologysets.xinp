@@ -1,0 +1,107 @@
+<?xml version='1.0' encoding='utf-8' standalone='no'?>
+<topologysets>
+  <set name="fundament" type="face">
+    <item patch="26">5</item>
+    <item patch="27">5</item>
+    <item patch="28">5</item>
+    <item patch="29">5</item>
+    <item patch="30">5</item>
+    <item patch="31">5</item>
+    <item patch="32">5</item>
+    <item patch="33">5</item>
+    <item patch="34">5</item>
+    <item patch="35">5</item>
+    <item patch="36">5</item>
+    <item patch="37">5</item>
+    <item patch="38">5</item>
+    <item patch="39">5</item>
+    <item patch="40">5</item>
+    <item patch="41">5</item>
+    <item patch="42">5</item>
+    <item patch="43">5</item>
+    <item patch="44">5</item>
+    <item patch="45">5</item>
+    <item patch="46">5</item>
+    <item patch="118">5</item>
+    <item patch="119">5</item>
+    <item patch="120">5</item>
+    <item patch="121">5</item>
+    <item patch="122">5</item>
+    <item patch="123">5</item>
+    <item patch="124">5</item>
+    <item patch="125">5</item>
+    <item patch="126">5</item>
+    <item patch="127">5</item>
+    <item patch="128">5</item>
+    <item patch="129">5</item>
+    <item patch="130">5</item>
+    <item patch="131">5</item>
+    <item patch="132">5</item>
+    <item patch="133">5</item>
+    <item patch="134">5</item>
+    <item patch="135">5</item>
+    <item patch="136">5</item>
+    <item patch="137">5</item>
+    <item patch="138">5</item>
+  </set>
+  <set name="road" type="face">
+    <item patch="7">6</item>
+    <item patch="8">6</item>
+    <item patch="9">6</item>
+    <item patch="10">6</item>
+    <item patch="11">6</item>
+    <item patch="12">6</item>
+    <item patch="22">6</item>
+    <item patch="23">6</item>
+    <item patch="24">6</item>
+    <item patch="25">6</item>
+    <item patch="53">6</item>
+    <item patch="58">6</item>
+    <item patch="63">6</item>
+    <item patch="66">6</item>
+    <item patch="67">6</item>
+    <item patch="74">6</item>
+    <item patch="75">6</item>
+    <item patch="76">6</item>
+    <item patch="77">6</item>
+    <item patch="78">6</item>
+    <item patch="79">6</item>
+    <item patch="89">6</item>
+    <item patch="90">6</item>
+    <item patch="91">6</item>
+    <item patch="92">6</item>
+    <item patch="99">6</item>
+    <item patch="100">6</item>
+    <item patch="101">6</item>
+    <item patch="102">6</item>
+    <item patch="103">6</item>
+    <item patch="104">6</item>
+    <item patch="114">6</item>
+    <item patch="115">6</item>
+    <item patch="116">6</item>
+    <item patch="117">6</item>
+    <item patch="145">6</item>
+    <item patch="150">6</item>
+    <item patch="155">6</item>
+    <item patch="158">6</item>
+    <item patch="159">6</item>
+    <item patch="166">6</item>
+    <item patch="167">6</item>
+    <item patch="168">6</item>
+    <item patch="169">6</item>
+    <item patch="170">6</item>
+    <item patch="171">6</item>
+    <item patch="181">6</item>
+    <item patch="182">6</item>
+    <item patch="183">6</item>
+    <item patch="184">6</item>
+  </set>
+  <set name="support" type="face">
+    <item patch="185">5</item>
+    <item patch="186">5</item>
+    <item patch="187">5</item>
+    <item patch="195">5</item>
+    <item patch="196">5</item>
+    <item patch="197">5</item>
+  </set>
+</topologysets>
