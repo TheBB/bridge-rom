@@ -23,7 +23,7 @@ from tqdm import tqdm
 from typing import Union, Iterable, Optional, List, Tuple, Union
 
 
-IFEM = '/home/eivind/repos/IFEM/Apps/Elasticity/Linear/build/bin/LinEl'
+IFEM = '/home/eivindf/repos/IFEM/Apps/Elasticity/Linear/build/bin/LinEl'
 INPUT = [
     'topology.xinp',
     'topologysets.xinp',
@@ -206,7 +206,7 @@ class BridgeCase:
                 shutil.copy(fn, root)
 
             dim = '-2D' if self.ndim == 2 else '-3D'
-            args = [IFEM, 'bridge.xinp', dim, '-hdf5', '-adap', '-cgl2']
+            args = [IFEM, 'bridge.xinp', dim, '-hdf5', '-adap', '-cgl2', '-petsc']
             if nprocs > 1:
                 args = ['mpirun', '-np', str(nprocs)] + args
             if self.nice != 0:
