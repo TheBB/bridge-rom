@@ -93,21 +93,12 @@ class BridgeCase:
     dump: bool = False
 
     # Discretization
-    order: int
     ndim: int
-    meshwidth: float
-    npatches: int
     ngauss: int
 
-    # Geometry
-    span: float
-    diameter: float
-
     # Parameters
-    load: float = 0.0
-    load_left: float = 0.0
-    load_right: float = 10.0
-    load_width: float = 0.5
+    load: float = 3.7e6
+    load_center: float = 0.0
 
     maxstep: int = 10
     beta: int = 5
@@ -200,8 +191,7 @@ class BridgeCase:
     def run(self, nsols: int, **kwargs):
         quadrule = quadpy.c1.gauss_legendre(nsols)
         params = {
-            'load_left': affine(quadrule.points, 0.0, self.span - self.load_width),
-            'load_right': affine(quadrule.points, self.load_width, self.span),
+            'load_center': affine(quadrule.points, -97.175, 97.175),
         }
 
         for i, params in tqdm(enumerate(dictzip(**params)), 'Solving', total=nsols):
@@ -254,7 +244,7 @@ class BridgeCase:
         }
 
         # Must run with one process to get dump
-        self.run_ifem(target, context, geometry, nprocs=1, ignore=True)
+        self.run_ifem(target, context, geometry, nprocs=1, ignore=True, ngauss=3)
 
     def extract(self, nsols: int):
         # Check that no renumbering has taken place within IFEM
@@ -317,7 +307,7 @@ class BridgeCase:
         numbering, _ = self.load_numbering()
         nodes = dict()
 
-        assert len(patches) == len(numbering) == self.npatches
+        assert len(patches) == len(numbering)
         for patch, numbers in zip(patches, numbering):
             controlpoints = patch.controlpoints
             assert len(numbers) == len(controlpoints)
@@ -348,8 +338,7 @@ class BridgeCase:
     def run_rhs(self, nsols: int, **kwargs):
         quadrule = quadpy.c1.gauss_legendre(nsols)
         params = {
-            'load_left': affine(quadrule.points, 0.0, self.span - self.load_width),
-            'load_right': affine(quadrule.points, self.load_width, self.span),
+            'load_center': affine(quadrule.points, -97.175, 97.175),
         }
 
         geometry = self.directory('merged') / 'geometry.lr'
@@ -378,20 +367,14 @@ class BridgeCase:
 
 
 @click.command()
-@click.option('--order', '-o', default=2)
 @click.option('--ndim', '-n', default=2)
-@click.option('--meshwidth', '-h', default=1.0)
-@click.option('--npatches', '-p', default=1)
-@click.option('--span', '-s', default=10.0)
-@click.option('--diameter', '-d', default=1.0)
-@click.option('--load', '-l', default=1e6)
 @click.option('--maxstep', default=10)
 @click.option('--beta', default=5)
 @click.option('--nsols', default=10)
 @click.option('--nred', default=5)
 @click.option('--nprocs', default=1)
 @click.option('--nice', default=0)
-@click.option('--ngauss', default=3)
+@click.option('--ngauss', default=10)
 def main(nsols: int, nred: int, **kwargs):
     case = BridgeCase(**kwargs)
     case.setup()
