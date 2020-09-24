@@ -79,6 +79,10 @@ def permute_rows(test, control):
 
 class BridgeCase:
 
+    # Operation
+    nprocs: int
+    nice: int
+
     # Discretization
     order: int
     ndim: int
@@ -172,7 +176,8 @@ class BridgeCase:
             f.write('  </set>\n')
             f.write('</topologysets>\n')
 
-    def run_ifem(self, target: Path, context: dict, geometry: Optional[Union[str, Path]] = None, ignore: bool = False):
+    def run_ifem(self, target: Path, context: dict, geometry: Optional[Union[str, Path]] = None,
+                 ignore: bool = False, rhs_only: bool = False):
         if geometry is None:
             geometry = 'geometry.g2'
 
@@ -190,8 +195,14 @@ class BridgeCase:
 
             dim = '-2D' if self.ndim == 2 else '-3D'
             args = [IFEM, 'bridge.xinp', dim, '-hdf5', '-adap', '-cgl2']
+            if self.nprocs > 1:
+                args = ['mpirun', '-np', str(self.nprocs)] + args
+            if self.nice != 0:
+                args = ['nice', f'-n{self.nice}'] + args
             if ignore:
                 args.append('-ignoresol')
+            if rhs_only:
+                args.append('-rhsonly')
             result = run(args, cwd=root, stdout=PIPE, stderr=PIPE)
             for fn in OUTPUT + [context['geometry']]:
                 if (root / fn).exists():
@@ -206,11 +217,12 @@ class BridgeCase:
             print('------------------------------------------------')
             raise
 
-    def run_single(self, path: Path, geometry: Optional[Union[str, Path]] = None, ignore: bool = False, **kwargs):
+    def run_single(self, path: Path, geometry: Optional[Union[str, Path]] = None,
+                   ignore: bool = False, rhs_only: bool = False, **kwargs):
         context = self.__class__.__dict__.copy()
         context.update(self.__dict__)
         context.update(kwargs)
-        self.run_ifem(path, context, geometry, ignore=ignore)
+        self.run_ifem(path, context, geometry, ignore=ignore, rhs_only=rhs_only)
 
     def run(self, nsols: int, **kwargs):
         quadrule = quadpy.c1.gauss_legendre(nsols)
@@ -351,7 +363,8 @@ class BridgeCase:
 
         geometry = self.directory('merged') / 'geometry.lr'
         for i, params in tqdm(enumerate(dictzip(**params)), 'Integrating', total=nsols):
-            self.run_single(self.directory('merged', i), geometry, **kwargs, **params, with_dirichlet=False, ignore=True)
+            self.run_single(self.directory('merged', i), geometry, **kwargs, **params,
+                            with_dirichlet=False, ignoresol=True, rhs_only=True)
 
     def compare(self, nsols: int, nred: int):
         hi_lhs = self.load_fullscale_superlu()
@@ -385,6 +398,8 @@ class BridgeCase:
 @click.option('--beta', default=5)
 @click.option('--nsols', default=10)
 @click.option('--nred', default=5)
+@click.option('--nprocs', default=1)
+@click.option('--nice', default=0)
 def main(nsols: int, nred: int, **kwargs):
     case = BridgeCase(**kwargs)
     case.setup()
