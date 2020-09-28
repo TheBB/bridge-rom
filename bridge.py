@@ -253,19 +253,15 @@ class BridgeCase:
                 move_meshlines(src, tgt1)
                 move_meshlines(src, tgt2)
 
-        permutations = [
-            [
+        for i, sol in tqdm(enumerate(solutions), 'Permuting', total=nsols):
+            perms = [
                 permute_rows(g.controlpoints, root.controlpoints)
-                for i, (root, (g, _)) in enumerate(zip(rootpatches, sol))
+                for root, (g, _) in zip(rootpatches, sol)
             ]
-            for sol in tqdm(solutions, 'Permuting')
-        ]
 
-        for i, (sol, perms) in enumerate(zip(solutions, permutations)):
             for (root, (g, _), perm) in zip(rootpatches, sol, perms):
                 np.testing.assert_allclose(root.controlpoints, g.controlpoints[perm,:])
 
-        for i, (sol, perms) in enumerate(zip(solutions, permutations)):
             path = self.directory('merged', i)
             with open(path / 'geometry.lr', 'wb') as f:
                 for (g, _) in sol:
