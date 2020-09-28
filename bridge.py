@@ -265,25 +265,20 @@ class BridgeCase:
             for (root, (g, _), perm) in zip(rootpatches, sol, perms):
                 np.testing.assert_allclose(root.controlpoints, g.controlpoints[perm,:])
 
+        for i, (sol, perms) in enumerate(zip(solutions, permutations)):
+            path = self.directory('merged', i)
+            with open(path / 'geometry.lr', 'wb') as f:
+                for (g, _) in sol:
+                    g.write(f)
+            with open(path / 'solution.lr', 'wb') as f:
+                for (_, s) in sol:
+                    s.write(f)
+            np.savez(path / 'permutation.npz', *perms)
+
         path = self.directory('merged')
         with open(path / 'geometry.lr', 'wb') as f:
             for root in rootpatches:
                 root.write(f)
-
-        # Generate numbering as side effect
-        self.fullscale()
-
-        # Check that no renumbering has taken place within IFEM
-        fullpatches = self.load_solution(self.directory('merged', 'fullscale'))
-        for root, (full, _) in zip(rootpatches, fullpatches):
-            np.testing.assert_allclose(root.controlpoints, full.controlpoints)
-
-        numbering, ndofs = self.load_numbering()
-        data = np.zeros((nsols, ndofs, self.ndim))
-        for i, (sol, perms) in enumerate(zip(solutions, permutations)):
-            for n, (_, s), perm in zip(numbering, sol, perms):
-                data[i,n,:] = s.controlpoints[perm,:]
-        np.save(self.directory('merged') / 'snapshots.npy', data.reshape(nsols, -1))
 
     def fullscale(self):
         geometry = self.directory('merged') / 'geometry.lr'
@@ -297,6 +292,25 @@ class BridgeCase:
 
         # Must run with one process to get dump
         self.run_ifem(target, context, geometry, nprocs=1, ignore=True)
+
+    def extract(self, nsols: int):
+        # Check that no renumbering has taken place within IFEM
+        fullpatches = self.load_solution(self.directory('merged', 'fullscale'))
+        with open(self.directory('merged') / 'geometry.lr', 'rb') as f:
+            rootpatches = lr.LRSplineObject.read_many(f)
+        for root, (full, _) in zip(rootpatches, fullpatches):
+            np.testing.assert_allclose(root.controlpoints, full.controlpoints)
+
+        numbering, ndofs = self.load_numbering()
+        data = np.zeros((nsols, ndofs, self.ndim))
+        for i in tqdm(range(nsols), 'Extracting'):
+            path = self.directory('merged', i)
+            with open(path / 'solution.lr', 'rb') as f:
+                sol = lr.LRSplineObject.read_many(f)
+            perms = np.load(path / 'permutation.npz')
+            for n, s, perm in zip(numbering, sol, perms.values()):
+                data[i,n,:] = s.controlpoints[perm,:]
+        np.save(self.directory('merged') / 'snapshots.npy', data.reshape(nsols, -1))
 
     def load_superlu(self, directory: Path):
         with open(directory / 'lhs.out') as f:
@@ -376,14 +390,12 @@ class BridgeCase:
 
         geometry = self.directory('merged') / 'geometry.lr'
         for i, params in tqdm(enumerate(dictzip(**params)), 'Integrating', total=nsols):
-            self.run_single(self.directory('merged', i), geometry, **kwargs, **params,
+            self.run_single(self.directory('rhs', i), geometry, **kwargs, **params,
                             with_dirichlet=False, ignoresol=True, rhs_only=True, dump=True, nprocs=1)
 
     def compare(self, nsols: int, nred: int):
         hi_lhs = self.load_fullscale_superlu()
-        print(hi_lhs.shape)
         proj = self.load_project(nred)
-        print(proj.shape)
         lo_lhs = proj @ hi_lhs @ proj.T
         data = self.load_snapshots()
         hi_mass = eye(data.shape[1])
@@ -391,7 +403,7 @@ class BridgeCase:
         errors = []
         for i in tqdm(range(nsols), 'Comparing'):
             hi_sol = data[i]
-            hi_rhs = self.load_rhs(self.directory('merged', i))
+            hi_rhs = self.load_rhs(self.directory('rhs', i))
             rc_sol = solve(lo_lhs, proj @ hi_rhs) @ proj
             diff = hi_sol - rc_sol
             error = np.sqrt(diff.T @ hi_mass @ diff) / np.sqrt(hi_sol.T @ hi_mass @ hi_sol)
@@ -421,6 +433,8 @@ def main(nsols: int, nred: int, **kwargs):
     case.setup()
     case.run(nsols)
     case.merge(nsols)
+    case.fullscale()
+    case.extract(nsols)
     case.verify_numbering()
     case.project(nred)
     case.run_rhs(nsols)
