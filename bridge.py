@@ -283,7 +283,7 @@ class BridgeCase:
             'with_dirichlet': False,
             'with_neumann': False,
             'maxstep': 0,
-            'dump': True,
+            'dump_matrix': True,
         }
 
         # Must run with one process to get dump
@@ -387,7 +387,7 @@ class BridgeCase:
         geometry = self.directory('merged') / 'geometry.lr'
         for i, params in tqdm(enumerate(dictzip(**params)), 'Integrating', total=nsols):
             self.run_single(self.directory('rhs', i), geometry, **kwargs, **params,
-                            with_dirichlet=False, ignoresol=True, rhs_only=True, dump=True, nprocs=1)
+                            with_dirichlet=False, ignoresol=True, rhs_only=True, dump_rhs=True, nprocs=1)
 
     def compare(self, nsols: int, nred: int):
         hi_lhs = self.load_fullscale_superlu()

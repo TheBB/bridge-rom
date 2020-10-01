@@ -30,9 +30,10 @@
 
   <postprocessing>
     <projection type="cgl2" />
-    {% if dump %}
-      <dump_sol_vector>sol.out</dump_sol_vector>
+    {% if dump_matrix %}
       <dump_lhs_matrix>lhs.out</dump_lhs_matrix>
+    {% endif %}
+    {% if dump_rhs %}
       <dump_rhs_vector>rhs.out</dump_rhs_vector>
     {% endif %}
   </postprocessing>
