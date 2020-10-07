@@ -241,10 +241,11 @@ class BridgeCase:
             'with_neumann': False,
             'maxstep': 0,
             'dump_matrix': True,
+            'ngauss': 3,
         }
 
         # Must run with one process to get dump
-        self.run_ifem(target, context, geometry, nprocs=1, ignore=True, ngauss=3)
+        self.run_ifem(target, context, geometry, nprocs=1, ignore=True)
 
     def extract(self, nsols: int):
         # Check that no renumbering has taken place within IFEM
@@ -269,7 +270,6 @@ class BridgeCase:
         with open(directory / 'lhs.out') as f:
             next(f)
             m, n, nnz = map(int, next(f).split())
-            print(len(next(f).split()))
             data = np.array(list(map(float, next(f).split())), dtype=float)
             n_indptr = int(next(f))
             indptr = np.array(list(map(int, next(f).split())), dtype=int)
@@ -370,21 +370,21 @@ class BridgeCase:
 @click.option('--ndim', '-n', default=2)
 @click.option('--maxstep', default=10)
 @click.option('--beta', default=5)
-@click.option('--nsols', default=10)
+@click.option('--nsols', default=50)
 @click.option('--nred', default=5)
 @click.option('--nprocs', default=1)
 @click.option('--nice', default=0)
 @click.option('--ngauss', default=10)
 def main(nsols: int, nred: int, **kwargs):
     case = BridgeCase(**kwargs)
-    case.setup()
-    case.run(nsols)
-    case.merge(nsols)
-    case.fullscale()
-    case.extract(nsols)
-    case.verify_numbering()
-    case.project(nred)
-    case.run_rhs(nsols)
+    # case.setup()
+    # case.run(nsols)
+    # case.merge(nsols)
+    # case.fullscale()
+    # case.extract(nsols)
+    # case.verify_numbering()
+    # case.project(nred)
+    # case.run_rhs(nsols)
     case.compare(nsols, nred)
 
 
