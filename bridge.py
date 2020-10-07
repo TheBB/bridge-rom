@@ -1,3 +1,4 @@
+from io import BytesIO
 from itertools import chain
 import os
 from pathlib import Path
@@ -44,11 +45,6 @@ Solution = List[Tuple[lr.LRSplineObject, lr.LRSplineObject]]
 def nel(span, meshwidth):
     return int(max(1, np.ceil(span / meshwidth)))
 
-def read_lr(data):
-    if data.startswith(b'# LRSPLINE SURFACE'):
-        return lr.LRSplineSurface(data)
-    return lr.LRSplineVolume(data)
-
 def move_meshlines(source, target):
     if isinstance(source, lr.LRSplineSurface):
         for meshline in source.meshlines:
@@ -76,6 +72,17 @@ def permute_rows(test, control):
     assert len(set(permutation)) == len(test) == len(control)
     np.testing.assert_allclose(test[permutation,:], control)
     return permutation
+
+def load_lr(stream):
+    data = stream.read()
+    if isinstance(data, str):
+        data = data.encode('utf-8')
+    with_renum = lr.LRSplineObject.read_many(BytesIO(data), renumber=True)
+    without_renum = lr.LRSplineObject.read_many(BytesIO(data), renumber=False)
+    assert len(with_renum) == len(without_renum)
+    if any((a.controlpoints != b.controlpoints).any() for a, b in zip(with_renum, without_renum)):
+        print('Reading changed ordering!')
+    return with_renum
 
 
 class BridgeCase:
@@ -129,7 +136,7 @@ class BridgeCase:
             npatches = len(group['basis'])
 
             for patchid in range(1, npatches + 1):
-                geompatch = read_lr(group[f'basis/{patchid}'][:].tobytes())
+                geompatch = load_lr(BytesIO(group[f'basis/{patchid}'][:].tobytes()))[0]
                 coeffs = group[f'fields/displacement/{patchid}'][:]
                 solpatch = geompatch.clone()
                 solpatch.controlpoints = coeffs.reshape(len(solpatch), -1)
@@ -208,7 +215,7 @@ class BridgeCase:
                 args.append('-ignoresol')
             if rhs_only:
                 args.append('-rhsonly')
-            print(args)
+            # print(args)
             result = run(args, cwd=root, stdout=PIPE, stderr=PIPE)
             for fn in OUTPUT + [context['geometry']]:
                 if (root / fn).exists():
@@ -293,7 +300,7 @@ class BridgeCase:
         # Check that no renumbering has taken place within IFEM
         fullpatches = self.load_solution(self.directory('merged', 'fullscale'))
         with open(self.directory('merged') / 'geometry.lr', 'rb') as f:
-            rootpatches = lr.LRSplineObject.read_many(f)
+            rootpatches = load_lr(f)
         for root, (full, _) in zip(rootpatches, fullpatches):
             np.testing.assert_allclose(root.controlpoints, full.controlpoints)
 
@@ -302,7 +309,7 @@ class BridgeCase:
         for i in tqdm(range(nsols), 'Extracting'):
             path = self.directory('merged', i)
             with open(path / 'solution.lr', 'rb') as f:
-                sol = lr.LRSplineObject.read_many(f)
+                sol = load_lr(f)
             perms = np.load(path / 'permutation.npz')
             for n, s, perm in zip(numbering, sol, perms.values()):
                 data[i,n,:] = s.controlpoints[perm,:]
@@ -342,7 +349,7 @@ class BridgeCase:
 
     def load_fullscale_geometry(self):
         with open(self.directory('merged') / 'geometry.lr') as f:
-            return lr.LRSplineObject.read_many(f)
+            return load_lr(f)
 
     def verify_numbering(self):
         patches = self.load_fullscale_geometry()
