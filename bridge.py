@@ -1,26 +1,22 @@
 from io import BytesIO
 from itertools import chain
-import os
 from pathlib import Path
 import shutil
 from subprocess import run, PIPE
 import tempfile
+
+from typing import Optional, List, Tuple, Union
 
 import click
 import h5py
 from jinja2 import Template
 import lrspline as lr
 import numpy as np
-from numpy.linalg import norm, solve
+from numpy.linalg import solve
 import quadpy
 from scipy.linalg import eigh
 from scipy.sparse import csc_matrix, eye
-import splipy.surface_factory as sf
-import splipy.volume_factory as vf
-from splipy.io import G2
 from tqdm import tqdm
-
-from typing import Union, Iterable, Optional, List, Tuple, Union
 
 
 IFEM = '/home/eivindf/repos/IFEM/Apps/Elasticity/Linear/build/bin/LinEl'
@@ -91,6 +87,7 @@ class BridgeCase:
     nprocs: int
     nice: int
     dump: bool = False
+    datadir: Path = Path('data')
 
     # Discretization
     ndim: int
@@ -111,11 +108,11 @@ class BridgeCase:
 
     def directory(self, name: str, index: Optional[Union[int, str]] = None) -> Path:
         if index is None:
-            path = Path('data') / name
+            path = self.datadir / name
         else:
             if isinstance(index, int):
                 index = f'{index:03}'
-            path = Path('data') / name / index
+            path = self.datadir / name / index
         path.mkdir(mode=0o775, exist_ok=True, parents=True)
         return path
 
@@ -166,11 +163,14 @@ class BridgeCase:
                 args.append('-ignoresol')
             if rhs_only:
                 args.append('-rhsonly')
-            # print(args)
             result = run(args, cwd=root, stdout=PIPE, stderr=PIPE)
             for fn in OUTPUT + [context['geometry']]:
                 if (root / fn).exists():
                     shutil.copy(root / fn, target)
+            with open(target / 'stdout.txt', 'wb') as f:
+                f.write(result.stdout)
+            with open(target / 'stderr.txt', 'wb') as f:
+                f.write(result.stdout)
 
         try:
             result.check_returncode()
@@ -191,7 +191,7 @@ class BridgeCase:
     def run(self, nsols: int, **kwargs):
         quadrule = quadpy.c1.gauss_legendre(nsols)
         params = {
-            'load_center': affine(quadrule.points, -97.175, 97.175),
+            'load_center': affine(quadrule.points, -42.175, 152.175),
         }
 
         for i, params in tqdm(enumerate(dictzip(**params)), 'Solving', total=nsols):
@@ -240,11 +240,12 @@ class BridgeCase:
             'with_dirichlet': False,
             'with_neumann': False,
             'maxstep': 0,
+            'ngauss': 3,
             'dump_matrix': True,
         }
 
         # Must run with one process to get dump
-        self.run_ifem(target, context, geometry, nprocs=1, ignore=True, ngauss=3)
+        self.run_ifem(target, context, geometry, nprocs=1, ignore=True)
 
     def extract(self, nsols: int):
         # Check that no renumbering has taken place within IFEM
@@ -291,8 +292,10 @@ class BridgeCase:
     def load_rhs(self, directory: Path):
         return self.load_vector(directory, 'rhs.out')
 
-    def load_numbering(self):
-        with h5py.File(self.directory('merged', 'fullscale') / 'bridge.hdf5', 'r') as f:
+    def load_numbering(self, path: Path = None):
+        if path is None:
+            path = self.directory('merged', 'fullscale')
+        with h5py.File(path / 'bridge.hdf5', 'r') as f:
             group = f['0/Elasticity-1/l2g-node']
             numbering = [group[f'{i+1}'][:] - 1 for i in range(len(group))]
         ndofs = max(map(np.max, numbering)) + 1
