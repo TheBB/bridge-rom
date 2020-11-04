@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 from subprocess import run, PIPE
 import tempfile
+import os
 
 from typing import Optional, List, Tuple, Union
 
@@ -57,16 +58,16 @@ def dictzip(**kwargs):
     for values in zip(*kwargs.values()):
         yield dict(zip(kwargs.keys(), values))
 
-def permute_rows(test, control):
+def permute_rows(test, control, atol=1e-10):
     mismatches = [
         i for i, (testrow, controlrow) in enumerate(zip(test, control))
-        if not np.allclose(testrow, controlrow)
+        if not np.allclose(testrow, controlrow, atol=atol)
     ]
     permutation = np.arange(len(test), dtype=np.int32)
     for i in mismatches:
-        permutation[i] = next(j for j in mismatches if np.allclose(test[j], control[i]))
+        permutation[i] = next(j for j in mismatches if np.allclose(test[j], control[i], atol=atol))
     assert len(set(permutation)) == len(test) == len(control)
-    np.testing.assert_allclose(test[permutation,:], control)
+    np.testing.assert_allclose(test[permutation,:], control, atol=atol)
     return permutation
 
 def load_lr(stream):
@@ -85,16 +86,17 @@ class BridgeCase:
 
     # Operation
     nprocs: int
+    nthreads: int
     nice: int
     dump: bool = False
     datadir: Path = Path('data')
 
     # Discretization
-    ndim: int
+    ndim: int = 3
     ngauss: int
 
     # Parameters
-    load: float = 3.7e6
+    load: float = 2.7e6 / 0.15 / 1.2 / 2 / 18
     load_center: float = 0.0
 
     maxstep: int = 10
@@ -153,6 +155,11 @@ class BridgeCase:
             for fn in INPUT + [geometry]:
                 shutil.copy(fn, root)
 
+            env = os.environ.copy()
+            env.update({
+                'OMP_NUM_THREADS': str(self.nthreads),
+            })
+
             dim = '-2D' if self.ndim == 2 else '-3D'
             args = [IFEM, 'bridge.xinp', dim, '-hdf5', '-adap', '-cgl2', '-petsc']
             if nprocs > 1:
@@ -163,14 +170,16 @@ class BridgeCase:
                 args.append('-ignoresol')
             if rhs_only:
                 args.append('-rhsonly')
-            result = run(args, cwd=root, stdout=PIPE, stderr=PIPE)
+            with open(target / 'invocation.txt', 'w') as f:
+                f.write(' '.join(args))
+            result = run(args, cwd=root, stdout=PIPE, stderr=PIPE, env=env)
             for fn in OUTPUT + [context['geometry']]:
                 if (root / fn).exists():
                     shutil.copy(root / fn, target)
             with open(target / 'stdout.txt', 'wb') as f:
                 f.write(result.stdout)
             with open(target / 'stderr.txt', 'wb') as f:
-                f.write(result.stdout)
+                f.write(result.stderr)
 
         try:
             result.check_returncode()
@@ -194,11 +203,12 @@ class BridgeCase:
             'load_center': affine(quadrule.points, -42.175, 152.175),
         }
 
-        for i, params in tqdm(enumerate(dictzip(**params)), 'Solving', total=nsols):
+        objs = list(enumerate(dictzip(**params)))
+        for i, params in tqdm(objs, 'Solving', total=len(objs)):
             self.run_single(self.directory('raw', i), **kwargs, **params)
 
     def merge(self, nsols: int):
-        solutions = [self.load_solution(self.directory('raw', i)) for i in range(nsols)]
+        solutions = [self.load_solution(self.directory('raw', i), step=3) for i in range(nsols)]
         rootpatches = [g.clone() for g, _ in solutions[0]]
 
         for sol in tqdm(solutions, 'Merging'):
@@ -217,7 +227,7 @@ class BridgeCase:
             ]
 
             for (root, (g, _), perm) in zip(rootpatches, sol, perms):
-                np.testing.assert_allclose(root.controlpoints, g.controlpoints[perm,:])
+                np.testing.assert_allclose(root.controlpoints, g.controlpoints[perm,:], atol=1e-10)
 
             path = self.directory('merged', i)
             with open(path / 'geometry.lr', 'wb') as f:
@@ -240,12 +250,25 @@ class BridgeCase:
             'with_dirichlet': False,
             'with_neumann': False,
             'maxstep': 0,
-            'ngauss': 3,
+            'ngauss': 10,
             'dump_matrix': True,
         }
 
         # Must run with one process to get dump
         self.run_ifem(target, context, geometry, nprocs=1, ignore=True)
+
+    def run_fullscale(self, nsols: int):
+        geometry = self.directory('merged') / 'geometry.lr'
+        quadrule = quadpy.c1.gauss_legendre(nsols)
+        params = {
+            'load_center': affine(quadrule.points, -42.175, 152.175),
+        }
+
+        objs = list(enumerate(dictzip(**params)))
+        objs = objs[:1]
+
+        for i, params in tqdm(objs, 'Solving', total=len(objs)):
+            self.run_single(self.directory('debug', i), geometry, maxstep=0, ngauss=10, dump_lhs=True, dump_rhs=True, nprocs=1, **params)
 
     def extract(self, nsols: int):
         # Check that no renumbering has taken place within IFEM
@@ -253,7 +276,7 @@ class BridgeCase:
         with open(self.directory('merged') / 'geometry.lr', 'rb') as f:
             rootpatches = load_lr(f)
         for root, (full, _) in zip(rootpatches, fullpatches):
-            np.testing.assert_allclose(root.controlpoints, full.controlpoints)
+            np.testing.assert_allclose(root.controlpoints, full.controlpoints, atol=1e-12)
 
         numbering, ndofs = self.load_numbering()
         data = np.zeros((nsols, ndofs, self.ndim))
@@ -270,7 +293,6 @@ class BridgeCase:
         with open(directory / 'lhs.out') as f:
             next(f)
             m, n, nnz = map(int, next(f).split())
-            print(len(next(f).split()))
             data = np.array(list(map(float, next(f).split())), dtype=float)
             n_indptr = int(next(f))
             indptr = np.array(list(map(int, next(f).split())), dtype=int)
@@ -341,7 +363,7 @@ class BridgeCase:
     def run_rhs(self, nsols: int, **kwargs):
         quadrule = quadpy.c1.gauss_legendre(nsols)
         params = {
-            'load_center': affine(quadrule.points, -97.175, 97.175),
+            'load_center': affine(quadrule.points, -42.175, 152.175),
         }
 
         geometry = self.directory('merged') / 'geometry.lr'
@@ -376,19 +398,21 @@ class BridgeCase:
 @click.option('--nsols', default=10)
 @click.option('--nred', default=5)
 @click.option('--nprocs', default=1)
+@click.option('--nthreads', default=1)
 @click.option('--nice', default=0)
 @click.option('--ngauss', default=10)
 def main(nsols: int, nred: int, **kwargs):
-    case = BridgeCase(**kwargs)
+    case = BridgeCase(**kwargs, datadir=Path('data-linear'))
     case.setup()
     case.run(nsols)
-    case.merge(nsols)
-    case.fullscale()
-    case.extract(nsols)
-    case.verify_numbering()
-    case.project(nred)
-    case.run_rhs(nsols)
-    case.compare(nsols, nred)
+    # case.merge(nsols)
+    # case.run_fullscale(nsols)
+    # case.fullscale()
+    # case.extract(nsols)
+    # case.verify_numbering()
+    # case.project(nred)
+    # case.run_rhs(nsols)
+    # case.compare(nsols, nred)
 
 
 if __name__ == '__main__':
