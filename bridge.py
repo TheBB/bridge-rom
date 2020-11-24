@@ -1,6 +1,8 @@
 from io import BytesIO
 from itertools import chain
+from mmap import ACCESS_READ, mmap
 from pathlib import Path
+import re
 import shutil
 from subprocess import run, PIPE
 import tempfile
@@ -80,6 +82,11 @@ def load_lr(stream):
     if any((a.controlpoints != b.controlpoints).any() for a, b in zip(with_renum, without_renum)):
         print('Reading changed ordering!')
     return with_renum
+
+def tokenize(f, pattern):
+    with mmap(f.fileno(), 0, access=ACCESS_READ) as m:
+        for match in re.finditer(pattern, m):
+            yield match[0]
 
 
 class BridgeCase:
@@ -291,16 +298,25 @@ class BridgeCase:
 
     def load_superlu(self, directory: Path):
         with open(directory / 'lhs.out') as f:
-            next(f)
-            m, n, nnz = map(int, next(f).split())
-            data = np.array(list(map(float, next(f).split())), dtype=float)
-            n_indptr = int(next(f))
-            indptr = np.array(list(map(int, next(f).split())), dtype=int)
-            n_indices = int(next(f))
-            indices = np.array(list(map(int, next(f).split())), dtype=int)
+            tokens = tokenize(f, br'(?:[+-]?)\d+(?:\.\d+)?(?:e[+-]\d+)?')
+            m = int(next(tokens))
+            n = int(next(tokens))
+            nnz = int(next(tokens))
 
-        assert len(indptr) == n_indptr == m+1 == n+1
-        assert nnz == n_indices == len(indices)
+            data = np.empty((nnz,), dtype=float)
+            for i in tqdm(range(nnz)):
+                data[i] = float(next(tokens))
+
+            assert int(next(tokens)) == m+1 == n+1
+            indptr = np.empty((m+1,), dtype=int)
+            for i in tqdm(range(m+1)):
+                indptr[i] = int(next(tokens))
+
+            assert int(next(tokens)) == nnz
+            indices = np.empty((nnz,), dtype=int)
+            for i in tqdm(range(nnz)):
+                indices[i] = int(next(tokens))
+
         return csc_matrix((data, indices, indptr), shape=(m, n))
 
     def load_vector(self, directory: Path, filename: str):
