@@ -7,6 +7,7 @@ import shutil
 from subprocess import run, PIPE
 import tempfile
 import os
+from time import time
 
 from typing import Optional, List, Tuple, Union
 
@@ -20,6 +21,22 @@ import quadpy
 from scipy.linalg import eigh
 from scipy.sparse import csc_matrix, eye
 from tqdm import tqdm
+
+
+class Timer(object):
+
+    def __init__(self, description=None):
+        self.description = description
+
+    def __enter__(self):
+        self.start = time()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.end = time()
+
+    def __call__(self):
+        return self.end - self.start
 
 
 IFEM = '/home/eivindf/repos/IFEM/Apps/Elasticity/Linear/build/bin/LinEl'
@@ -394,17 +411,21 @@ class BridgeCase:
         data = self.load_snapshots()
         hi_mass = eye(data.shape[1])
 
-        errors = []
+        errors, times = [], []
         for i in tqdm(range(nsols), 'Comparing'):
             hi_sol = data[i]
             hi_rhs = self.load_rhs(self.directory('rhs', i))
-            rc_sol = solve(lo_lhs, proj @ hi_rhs) @ proj
+            with Timer() as t:
+                rc_sol = solve(lo_lhs, proj @ hi_rhs) @ proj
+            times.append(t())
             diff = hi_sol - rc_sol
             error = np.sqrt(diff.T @ hi_mass @ diff) / np.sqrt(hi_sol.T @ hi_mass @ hi_sol)
             errors.append(error)
 
         print(f'Average error: {np.mean(errors):.2e}')
         print(f'Maximal error: {np.max(errors):.2e}')
+        print(f'Average duration: {np.mean(times):.2e}')
+        print(f'Maximal duration: {np.max(times):.2e}')
 
 
 @click.command()
@@ -420,7 +441,7 @@ class BridgeCase:
 def main(nsols: int, nred: int, **kwargs):
     case = BridgeCase(**kwargs, datadir=Path('data-linear'))
     case.setup()
-    case.run(nsols)
+    # case.run(nsols)
     # case.merge(nsols)
     # case.run_fullscale(nsols)
     # case.fullscale()
@@ -428,7 +449,7 @@ def main(nsols: int, nred: int, **kwargs):
     # case.verify_numbering()
     # case.project(nred)
     # case.run_rhs(nsols)
-    # case.compare(nsols, nred)
+    case.compare(nsols, nred)
 
 
 if __name__ == '__main__':
