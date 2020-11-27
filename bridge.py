@@ -105,6 +105,19 @@ def tokenize(f, pattern):
         for match in re.finditer(pattern, m):
             yield match[0]
 
+def write_ifem(path, coeffs, patches, numbering):
+    with h5py.File(path, 'w') as f:
+        elast = f.require_group('0/Elasticity-1')
+        basis = elast.require_group('basis')
+        displ = elast.require_group('fields/displacement')
+        for i, (patch, nodemap) in enumerate(zip(patches, numbering)):
+            with BytesIO() as b:
+                patch.write(b)
+                b.seek(0)
+                basis[f'{i+1}'] = np.frombuffer(b.getvalue(), dtype=np.int8)
+            patchcoeffs = np.array([coeffs[j,:] for j in nodemap])
+            displ[f'{i+1}'] = patchcoeffs.flatten()
+
 
 class BridgeCase:
 
@@ -378,7 +391,7 @@ class BridgeCase:
     def load_fullscale_superlu(self):
         return self.load_superlu(self.directory('merged', 'fullscale'))
 
-    def project(self, nred: int):
+    def project(self, nred: int, save_bfuns: bool = False):
         data = self.load_snapshots()
         hi_mass = eye(data.shape[1])
 
@@ -388,6 +401,13 @@ class BridgeCase:
         np.savetxt(self.directory('reduced') / 'spectrum.csv', eigvals / eigvals[0])
 
         proj = data.T @ eigvecs[:, :nred] / np.sqrt(eigvals[:nred])
+
+        if save_bfuns:
+            numbering, _ = self.load_numbering()
+            patches = self.load_fullscale_geometry()
+            for i, bfun in tqdm(enumerate(proj.T), 'Writing', total=nred):
+                write_ifem(self.directory('bfuns', i) / 'bfun.hdf5', bfun.reshape(-1, 3), patches, numbering)
+
         np.save(self.directory('reduced', nred) / 'proj.npy', proj.T)
 
     def load_project(self, nred: int):
